@@ -22,9 +22,11 @@ function App() {
   const [processingProgress, setProcessingProgress] = useState(0);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [customVideoUrl, setCustomVideoUrl] = useState('');
+  const [uploadedVideoObjectUrl, setUploadedVideoObjectUrl] = useState<string>('');
 
-  // Sample sign language video (replace with your actual video)
-  const sampleSignLanguageVideo = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+  // Default video used if no custom/uploaded video is provided
+  const sampleSignLanguageVideo = '/video.mp4';
 
   useEffect(() => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -54,6 +56,34 @@ function App() {
     }
   }, [appState]);
 
+  // Cleanup any created object URLs when component unmounts or when a new one is set
+  useEffect(() => {
+    return () => {
+      if (uploadedVideoObjectUrl) {
+        URL.revokeObjectURL(uploadedVideoObjectUrl);
+      }
+    };
+  }, [uploadedVideoObjectUrl]);
+
+  // Ensure video loads and autoplays when result is ready and URL changes
+  useEffect(() => {
+    const currentVideoUrl = conversations[0]?.videoUrl;
+    if (appState === 'result' && currentVideoUrl && videoRef.current) {
+      const el = videoRef.current;
+      try {
+        el.load();
+        const playPromise = el.play();
+        if (playPromise && typeof playPromise.then === 'function') {
+          playPromise.then(() => setIsPlaying(true)).catch(() => {});
+        } else {
+          setIsPlaying(true);
+        }
+      } catch {
+        // noop
+      }
+    }
+  }, [appState, conversations]);
+
   const processToSignLanguage = async (text: string) => {
     setAppState('processing');
     setProcessingProgress(0);
@@ -75,11 +105,13 @@ function App() {
     clearInterval(progressInterval);
     setProcessingProgress(100);
     
+    const selectedVideoUrl = uploadedVideoObjectUrl || customVideoUrl || sampleSignLanguageVideo;
+
     const newConversation: ConversationItem = {
       id: Date.now().toString(),
       text,
       timestamp: new Date(),
-      videoUrl: sampleSignLanguageVideo
+      videoUrl: selectedVideoUrl
     };
     
     setConversations(prev => [newConversation, ...prev]);
@@ -349,9 +381,9 @@ function App() {
 
               <div className="space-y-4">
                 <h2 className="text-3xl font-bold bg-gradient-to-r from-red-400 to-white bg-clip-text text-transparent">
-                  Analysing Speech
+                  Processing Speech
                 </h2>
-                <p className="text-gray-400">AI is processing your speech and generating sign language...</p>
+                <p className="text-gray-400">Converting your speech to sign language video...</p>
                 
                 {/* Progress bar */}
                 <div className="max-w-md mx-auto">
@@ -455,12 +487,16 @@ function App() {
                     <video
                       ref={videoRef}
                       className="w-full h-full object-cover"
+                      controls
+                      muted
+                      playsInline
+                      autoPlay
                       poster="https://images.pexels.com/photos/7289714/pexels-photo-7289714.jpeg?auto=compress&cs=tinysrgb&w=800"
                       onEnded={() => setIsPlaying(false)}
                       onPlay={() => setIsPlaying(true)}
                       onPause={() => setIsPlaying(false)}
                     >
-                      <source src={conversations[0]?.videoUrl} type="video/mp4" />
+                      <source key={conversations[0]?.videoUrl} src={conversations[0]?.videoUrl} type="video/mp4" />
                     </video>
                     
                     {/* Video Controls */}
@@ -523,6 +559,65 @@ function App() {
                     <option value="FSL">French Sign Language (FSL)</option>
                     <option value="JSL">Japanese Sign Language (JSL)</option>
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Custom Video URL (MP4)</label>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/your-sign-video.mp4"
+                    value={customVideoUrl}
+                    onChange={(e) => {
+                      setCustomVideoUrl(e.target.value);
+                      if (e.target.value) {
+                        if (uploadedVideoObjectUrl) {
+                          URL.revokeObjectURL(uploadedVideoObjectUrl);
+                          setUploadedVideoObjectUrl('');
+                        }
+                      }
+                    }}
+                    className="w-full bg-black border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">If provided, this URL will be used for the next translation result.</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Or Upload Video File</label>
+                  <input
+                    type="file"
+                    accept="video/*"
+                    onChange={(e) => {
+                      const file = e.target.files && e.target.files[0];
+                      if (!file) return;
+                      if (uploadedVideoObjectUrl) {
+                        URL.revokeObjectURL(uploadedVideoObjectUrl);
+                      }
+                      const objectUrl = URL.createObjectURL(file);
+                      setUploadedVideoObjectUrl(objectUrl);
+                      if (customVideoUrl) {
+                        setCustomVideoUrl('');
+                      }
+                    }}
+                    className="w-full bg-black border border-gray-600 rounded-lg px-3 py-2 text-white focus:border-red-500 focus:outline-none"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">We will use the uploaded file for the next translation result.</p>
+                  {(uploadedVideoObjectUrl || customVideoUrl) && (
+                    <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
+                      <span>
+                        Using: {uploadedVideoObjectUrl ? 'Uploaded file' : 'Custom URL'}
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (uploadedVideoObjectUrl) {
+                            URL.revokeObjectURL(uploadedVideoObjectUrl);
+                            setUploadedVideoObjectUrl('');
+                          }
+                          setCustomVideoUrl('');
+                        }}
+                        className="text-red-400 hover:text-red-300"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div className="flex justify-end space-x-3 pt-4">
                   <motion.button
